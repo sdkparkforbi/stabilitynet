@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Protein Aggregation – Causal Network</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0e1a;--surface:#111827;--border:#1e293b;
+  --text:#e2e8f0;--text-dim:#94a3b8;--text-muted:#64748b;
+  --accent:#38bdf8;--glow:rgba(56,189,248,0.15);
+  --cat-structure:#f472b6;--cat-chemical:#fb923c;--cat-temperature:#facc15;
+  --cat-solution:#a78bfa;--cat-process:#34d399;--cat-contaminant:#f87171;
+  --cat-control:#38bdf8;--cat-detection:#818cf8;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif}
+
+/* Top bar */
+.topbar{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 24px;
+  background:linear-gradient(180deg,rgba(10,14,26,0.97) 0%,rgba(10,14,26,0.85) 100%);
+  backdrop-filter:blur(12px);border-bottom:1px solid var(--border);
+}
+.topbar h1{font-size:15px;font-weight:600;letter-spacing:-0.3px;color:var(--text)}
+.topbar h1 span{color:var(--accent);font-weight:700}
+.topbar .meta{font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono',monospace}
+
+/* Legend */
+.legend{
+  position:fixed;top:56px;left:16px;z-index:90;
+  background:rgba(17,24,39,0.92);backdrop-filter:blur(10px);
+  border:1px solid var(--border);border-radius:10px;
+  padding:14px 16px;min-width:180px;
+  transition:all .3s ease;
+}
+.legend.collapsed{padding:14px 16px 6px}
+.legend h3{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--text-muted);margin-bottom:10px;cursor:pointer;user-select:none}
+.legend h3::after{content:'▾';float:right;transition:transform .2s}
+.legend.collapsed h3::after{transform:rotate(-90deg)}
+.legend-items{overflow:hidden;transition:max-height .3s ease,opacity .3s ease;max-height:400px;opacity:1}
+.legend.collapsed .legend-items{max-height:0;opacity:0}
+.legend-item{
+  display:flex;align-items:center;gap:8px;padding:4px 0;
+  cursor:pointer;transition:opacity .15s;font-size:12px;color:var(--text-dim);
+}
+.legend-item:hover{opacity:1;color:var(--text)}
+.legend-item.dimmed{opacity:0.3}
+.legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+
+/* Controls */
+.controls{
+  position:fixed;top:56px;right:16px;z-index:90;
+  display:flex;flex-direction:column;gap:6px;
+}
+.ctrl-btn{
+  width:36px;height:36px;border-radius:8px;border:1px solid var(--border);
+  background:rgba(17,24,39,0.92);backdrop-filter:blur(10px);
+  color:var(--text-dim);font-size:16px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:all .15s;
+}
+.ctrl-btn:hover{background:rgba(56,189,248,0.1);color:var(--accent);border-color:rgba(56,189,248,0.3)}
+
+/* Tooltip */
+.tooltip{
+  position:fixed;z-index:200;pointer-events:none;
+  background:rgba(17,24,39,0.96);backdrop-filter:blur(12px);
+  border:1px solid var(--border);border-radius:10px;
+  padding:14px 16px;max-width:340px;
+  box-shadow:0 8px 32px rgba(0,0,0,0.5);
+  opacity:0;transition:opacity .15s;
+  font-size:12px;line-height:1.5;
+}
+.tooltip.show{opacity:1}
+.tooltip .tt-label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:4px}
+.tooltip .tt-name{font-size:14px;font-weight:600;margin-bottom:6px}
+.tooltip .tt-detail{color:var(--text-dim);font-size:11px}
+.tooltip .tt-refs{color:var(--text-muted);font-size:10px;font-family:'JetBrains Mono',monospace;margin-top:6px;border-top:1px solid var(--border);padding-top:6px}
+.tooltip .tt-edge-label{
+  display:inline-block;padding:2px 8px;border-radius:4px;
+  font-size:10px;font-weight:600;letter-spacing:0.5px;
+  margin-bottom:4px;
+}
+
+/* Info panel */
+.info-panel{
+  position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:90;
+  background:rgba(17,24,39,0.85);backdrop-filter:blur(10px);
+  border:1px solid var(--border);border-radius:10px;
+  padding:8px 18px;font-size:11px;color:var(--text-muted);
+  font-family:'JetBrains Mono',monospace;
+  transition:opacity .3s;
+}
+
+/* SVG */
+svg{width:100%;height:100%}
+.link{fill:none;stroke-opacity:0.35;transition:stroke-opacity .2s}
+.link:hover{stroke-opacity:0.8}
+.link-label{
+  font-family:'JetBrains Mono',monospace;font-size:8.5px;
+  fill:var(--text-muted);pointer-events:none;opacity:0.7;
+}
+.node-circle{stroke-width:2;cursor:pointer;transition:r .15s,stroke-opacity .15s}
+.node-circle:hover{stroke-opacity:1}
+.node-label{
+  font-family:'DM Sans',sans-serif;font-size:9px;font-weight:500;
+  fill:var(--text-dim);pointer-events:none;text-anchor:middle;
+  dominant-baseline:central;
+}
+.node-label-bg{fill:rgba(10,14,26,0.7);rx:3}
+
+/* Arrow marker */
+marker path{transition:fill .2s}
+
+/* Search */
+.search-box{
+  position:fixed;top:56px;left:50%;transform:translateX(-50%);z-index:95;
+  opacity:0;pointer-events:none;transition:all .25s;
+}
+.search-box.show{opacity:1;pointer-events:all;top:62px}
+.search-box input{
+  width:280px;padding:8px 14px;border-radius:8px;
+  border:1px solid var(--border);background:rgba(17,24,39,0.96);
+  color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;
+  outline:none;backdrop-filter:blur(10px);
+}
+.search-box input:focus{border-color:rgba(56,189,248,0.4);box-shadow:0 0 0 3px rgba(56,189,248,0.1)}
+.search-box input::placeholder{color:var(--text-muted)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1><span>●</span> Protein Aggregation — Causal Network</h1>
+  <div class="meta">Wang & Roberts, Int J Pharm 550 (2018) 251–268</div>
+</div>
+
+<div class="legend" id="legend">
+  <h3 onclick="toggleLegend()">Categories</h3>
+  <div class="legend-items" id="legendItems"></div>
+</div>
+
+<div class="controls">
+  <button class="ctrl-btn" onclick="zoomIn()" title="Zoom In">+</button>
+  <button class="ctrl-btn" onclick="zoomOut()" title="Zoom Out">−</button>
+  <button class="ctrl-btn" onclick="resetZoom()" title="Reset">⟲</button>
+  <button class="ctrl-btn" onclick="toggleSearch()" title="Search">⌕</button>
+</div>
+
+<div class="search-box" id="searchBox">
+  <input type="text" id="searchInput" placeholder="Search nodes..." oninput="handleSearch(this.value)">
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+<div class="info-panel" id="infoPanel">drag nodes · scroll to zoom · click legend to filter</div>
+
+<svg id="graph"></svg>
+
+<script>
+const CATEGORIES = {
+  'Structure':    {color:'#f472b6', label:'Protein Structure'},
+  'Chemical':     {color:'#fb923c', label:'Chemical Degradation'},
+  'Temperature':  {color:'#facc15', label:'Temperature'},
+  'Solution':     {color:'#a78bfa', label:'Solution Conditions'},
+  'Process':      {color:'#34d399', label:'Manufacturing Process'},
+  'Contaminant':  {color:'#f87171', label:'Contaminants'},
+  'Control':      {color:'#38bdf8', label:'Control Strategy'},
+  'Detection':    {color:'#818cf8', label:'Detection Method'},
+  'Core':         {color:'#e2e8f0', label:'Core Concept'},
+};
+
+const nodes = [
+  // Core concepts
+  {id:'aggregation',label:'Protein\nAggregation',cat:'Core',r:22},
+  {id:'nucleation',label:'Nucleation',cat:'Core',r:16},
+  {id:'agg_growth',label:'Aggregate\nGrowth',cat:'Core',r:16},
+  {id:'conf_stability',label:'Conformational\nStability',cat:'Core',r:14},
+  {id:'colloidal_stability',label:'Colloidal\nStability',cat:'Core',r:14},
+  {id:'ppi',label:'Protein-Protein\nInteractions',cat:'Core',r:15},
+  {id:'oligomers',label:'Oligomers/\nClusters',cat:'Core',r:13},
+  {id:'particles',label:'Subvisible/\nVisible Particles',cat:'Core',r:14},
+  {id:'opalescence',label:'Opalescence\n/ LLPS',cat:'Core',r:12},
+  {id:'immunogenicity',label:'Immunogenicity',cat:'Core',r:12},
+  {id:'viscosity',label:'Viscosity\nIncrease',cat:'Core',r:11},
+
+  // Structure
+  {id:'hydrophobic_aa',label:'Hydrophobic\nAmino Acids',cat:'Structure',r:11},
+  {id:'apr',label:'Aggregation-Prone\nRegions (APR)',cat:'Structure',r:12},
+  {id:'glycosylation',label:'Glycosylation',cat:'Structure',r:11},
+  {id:'beta_sheet',label:'β-Sheet\nContent',cat:'Structure',r:10},
+  {id:'disulfide',label:'Disulfide Bond\nFormation',cat:'Structure',r:10},
+
+  // Chemical
+  {id:'oxidation',label:'Oxidation',cat:'Chemical',r:11},
+  {id:'deamidation',label:'Deamidation',cat:'Chemical',r:10},
+  {id:'glycation',label:'Glycation',cat:'Chemical',r:10},
+  {id:'adc_conjugation',label:'ADC Drug\nConjugation',cat:'Chemical',r:10},
+
+  // Temperature
+  {id:'high_temp',label:'High\nTemperature',cat:'Temperature',r:12},
+  {id:'low_temp',label:'Low\nTemperature',cat:'Temperature',r:12},
+
+  // Solution
+  {id:'ph',label:'Solution pH',cat:'Solution',r:12},
+  {id:'ionic_strength',label:'Ionic\nStrength',cat:'Solution',r:11},
+  {id:'sugars_bulk',label:'Sugars\n(in solution)',cat:'Solution',r:10},
+  {id:'surfactant_degrad',label:'Surfactant\nDegradation',cat:'Solution',r:10},
+  {id:'preservatives',label:'Antimicrobial\nPreservatives',cat:'Solution',r:9},
+
+  // Process
+  {id:'freezing',label:'Freezing',cat:'Process',r:11},
+  {id:'agitation',label:'Agitation',cat:'Process',r:11},
+  {id:'pumping',label:'Pumping/\nShearing',cat:'Process',r:10},
+  {id:'light',label:'Light\nExposure',cat:'Process',r:11},
+  {id:'drying',label:'Drying',cat:'Process',r:10},
+  {id:'sonication',label:'Sonication',cat:'Process',r:9},
+
+  // Contaminant
+  {id:'metal_ions',label:'Metal Ion\nContaminants',cat:'Contaminant',r:10},
+  {id:'disinfectants',label:'Disinfectant\nResidues',cat:'Contaminant',r:9},
+  {id:'nano_impurities',label:'Nanoparticulate\nImpurities',cat:'Contaminant',r:9},
+
+  // Control
+  {id:'hotspot_mut',label:'Hot Spot\nMutation',cat:'Control',r:11},
+  {id:'pegylation',label:'PEGylation/\nHESylation',cat:'Control',r:10},
+  {id:'ph_optim',label:'pH\nOptimization',cat:'Control',r:10},
+  {id:'surfactants',label:'Surfactants\n(PS20/80)',cat:'Control',r:11},
+  {id:'sugar_stab',label:'Sugar\nStabilizers',cat:'Control',r:10},
+  {id:'arginine',label:'Arginine\n(+ Glu)',cat:'Control',r:12},
+  {id:'lyophilization',label:'Lyophilization',cat:'Control',r:10},
+  {id:'high_pressure',label:'High Hydrostatic\nPressure',cat:'Control',r:9},
+  {id:'filters',label:'In-line\nFilters',cat:'Control',r:9},
+
+  // Detection
+  {id:'sec_hplc',label:'SEC-HPLC',cat:'Detection',r:10},
+  {id:'dls',label:'DLS',cat:'Detection',r:9},
+  {id:'mfi',label:'Flow Imaging\n(MFI)',cat:'Detection',r:10},
+  {id:'nta',label:'NTA',cat:'Detection',r:8},
+  {id:'raman',label:'Raman\nSpectroscopy',cat:'Detection',r:9},
+];
+
+const edges = [
+  // Structure → Core
+  {s:'hydrophobic_aa',t:'apr',rel:'form',detail:'Hydrophobic residues form aggregation-prone sequences'},
+  {s:'apr',t:'nucleation',rel:'initiate',detail:'Hot spots in CDR1, Fab, Fc, CH2, CH3 domains'},
+  {s:'glycosylation',t:'conf_stability',rel:'enhances',detail:'CH2 glycosylation stabilizes mAb structure'},
+  {s:'beta_sheet',t:'aggregation',rel:'correlates with',detail:'Lyophilization-induced aggregation linked to β-sheet %'},
+  {s:'disulfide',t:'oligomers',rel:'cross-links',detail:'Intermolecular disulfide bonds directly create oligomers'},
+
+  // Core internal
+  {s:'nucleation',t:'oligomers',rel:'produces',detail:'Non-native dimers/oligomers as initial nucleus'},
+  {s:'oligomers',t:'agg_growth',rel:'feeds',detail:'Oligomers grow via monomer addition or condensation'},
+  {s:'agg_growth',t:'particles',rel:'produces',detail:'Growth leads to subvisible and visible particulates'},
+  {s:'agg_growth',t:'aggregation',rel:'part of',detail:'Aggregate growth is a key aggregation stage'},
+  {s:'nucleation',t:'aggregation',rel:'initiates',detail:'Nucleation is the first step of aggregation'},
+  {s:'ppi',t:'nucleation',rel:'drives',detail:'Protein-protein interactions facilitate initial association'},
+  {s:'ppi',t:'oligomers',rel:'forms',detail:'Electrostatic and hydrophobic PPIs create oligomers'},
+  {s:'ppi',t:'opalescence',rel:'causes',detail:'Concentration-dependent PPIs cause light scattering'},
+  {s:'conf_stability',t:'nucleation',rel:'controls rate',detail:'Higher stability may slow nucleation'},
+  {s:'colloidal_stability',t:'agg_growth',rel:'controls rate',detail:'B22/kD correlate with growth propensity'},
+  {s:'aggregation',t:'immunogenicity',rel:'enhances',detail:'Aggregates often more immunogenic than monomers'},
+  {s:'aggregation',t:'viscosity',rel:'increases',detail:'Protein network and larger species increase viscosity'},
+  {s:'oligomers',t:'opalescence',rel:'causes',detail:'Rayleigh scattering ∝ r⁶ of scattering particles'},
+
+  // Chemical → Core
+  {s:'oxidation',t:'aggregation',rel:'promotes',detail:'Surface hydrophobicity ↑, conformational stability ↓'},
+  {s:'deamidation',t:'aggregation',rel:'enhances',detail:'Destabilization + enhanced attractive PPIs'},
+  {s:'glycation',t:'ppi',rel:'alters',detail:'Changes surface charge and hydrophobicity'},
+  {s:'adc_conjugation',t:'aggregation',rel:'increases',detail:'Hydrophobic drug enlarges hydrophobic surface; DAR-dependent'},
+  {s:'light',t:'oxidation',rel:'generates ROS →',detail:'Singlet oxygen oxidizes Trp, Met residues'},
+
+  // Temperature → Core
+  {s:'high_temp',t:'aggregation',rel:'accelerates',detail:'More unfolded states, faster diffusion/collision'},
+  {s:'high_temp',t:'conf_stability',rel:'reduces',detail:'Non-Arrhenius behavior in wide T range'},
+  {s:'low_temp',t:'oligomers',rel:'enhances',detail:'Enhanced attractive PPIs at lower temperature'},
+  {s:'low_temp',t:'opalescence',rel:'induces',detail:'Cold-enhanced oligomerization → LLPS, gel, opalescence'},
+  {s:'low_temp',t:'conf_stability',rel:'cold-unfolding',detail:'36% → 76% cold-denatured population at 4°C'},
+
+  // Solution → Core
+  {s:'ph',t:'conf_stability',rel:'alters',detail:'pH affects both conformational and colloidal stability'},
+  {s:'ph',t:'ppi',rel:'modulates',detail:'Changes nature and degree of protein-protein interactions'},
+  {s:'ionic_strength',t:'ppi',rel:'modulates',detail:'Bell-shaped effect possible; pH-dependent magnitude'},
+  {s:'ionic_strength',t:'conf_stability',rel:'affects',detail:'Salt-dependent conformational stability changes'},
+  {s:'sugars_bulk',t:'aggregation',rel:'may promote\n(agitation)',detail:'>500mM trehalose promotes agitation-induced aggregation'},
+  {s:'surfactant_degrad',t:'aggregation',rel:'promotes',detail:'Fatty acids, peroxides, aldehydes interact with protein'},
+  {s:'preservatives',t:'aggregation',rel:'enhances',detail:'Unfolding and destabilization of proteins'},
+
+  // Process → Core
+  {s:'freezing',t:'aggregation',rel:'induces',detail:'Cold denaturation, ice adsorption, solute concentration ~600mg/mL'},
+  {s:'agitation',t:'aggregation',rel:'induces',detail:'Air/liquid interface, shear stress, hydrophobic surface'},
+  {s:'pumping',t:'particles',rel:'generates',detail:'Shearing, depressurization, abrasion'},
+  {s:'light',t:'aggregation',rel:'induces',detail:'HMW species with oxidized Trp/Met residues'},
+  {s:'drying',t:'aggregation',rel:'facilitates',detail:'Removal of protein hydration layer'},
+  {s:'sonication',t:'aggregation',rel:'induces',detail:'Cavitation, acoustic pressure, local T rise'},
+
+  // Contaminant → Core
+  {s:'metal_ions',t:'aggregation',rel:'catalyzes',detail:'Metal-catalyzed oxidation → aggregation'},
+  {s:'disinfectants',t:'oxidation',rel:'causes',detail:'HOCl, peracetic acid oxidize proteins'},
+  {s:'nano_impurities',t:'aggregation',rel:'impacts',detail:'From pharmaceutical-grade excipients'},
+
+  // Control → Core (inhibitory)
+  {s:'hotspot_mut',t:'apr',rel:'removes/modifies',detail:'Single mutation can be effective; risk of activity loss'},
+  {s:'pegylation',t:'apr',rel:'shields',detail:'Hydrophilic moiety covers aggregation hot spot'},
+  {s:'ph_optim',t:'aggregation',rel:'minimizes',detail:'Buffer agent choice also matters'},
+  {s:'surfactants',t:'aggregation',rel:'inhibits\n(surface)',detail:'Reduce adsorption to interfaces; weak protein interaction'},
+  {s:'sugar_stab',t:'conf_stability',rel:'enhances',detail:'Preferential exclusion mechanism'},
+  {s:'arginine',t:'oligomers',rel:'disrupts',detail:'Binds ~17 per mAb oligomer; Arg-Glu > Arg-HCl'},
+  {s:'lyophilization',t:'aggregation',rel:'controls\n(solid state)',detail:'Annealing reduces surface fraction; co-optimize formulation'},
+  {s:'high_pressure',t:'aggregation',rel:'dissociates',detail:'2-3 kbar for 30 min on inclusion bodies'},
+  {s:'filters',t:'particles',rel:'removes',detail:'16% of marketed products use filtration'},
+
+  // Detection → targets
+  {s:'sec_hplc',t:'oligomers',rel:'detects',detail:'Soluble aggregates; may miss due to dilution/adsorption'},
+  {s:'dls',t:'oligomers',rel:'monitors',detail:'Limited resolution; TDA more sensitive'},
+  {s:'mfi',t:'particles',rel:'images',detail:'Morphology + size; silicone oil differentiation'},
+  {s:'nta',t:'particles',rel:'tracks\n(0.1μm+)',detail:'Semi-quantitative; operator-dependent'},
+  {s:'raman',t:'beta_sheet',rel:'measures',detail:'β-sheet increase as aggregation proxy'},
+];
+
+// Build
+const nodeMap = {};
+nodes.forEach(n => { n.x = 0; n.y = 0; nodeMap[n.id] = n; });
+
+const width = window.innerWidth, height = window.innerHeight;
+const svg = d3.select('#graph').attr('viewBox', [0,0,width,height]);
+
+// Defs
+const defs = svg.append('defs');
+
+// Arrow markers per category
+Object.entries(CATEGORIES).forEach(([cat,{color}]) => {
+  defs.append('marker')
+    .attr('id',`arrow-${cat}`).attr('viewBox','0 -4 8 8')
+    .attr('refX',12).attr('refY',0).attr('markerWidth',6).attr('markerHeight',6)
+    .attr('orient','auto')
+    .append('path').attr('d','M0,-3.5L8,0L0,3.5').attr('fill',color).attr('opacity',0.5);
+});
+
+// Glow filter
+const glow = defs.append('filter').attr('id','glow');
+glow.append('feGaussianBlur').attr('stdDeviation','3').attr('result','blur');
+const merge = glow.append('feMerge');
+merge.append('feMergeNode').attr('in','blur');
+merge.append('feMergeNode').attr('in','SourceGraphic');
+
+const g = svg.append('g');
+
+// Zoom
+const zoom = d3.zoom().scaleExtent([0.2,4]).on('zoom', e => g.attr('transform',e.transform));
+svg.call(zoom);
+
+function zoomIn(){ svg.transition().duration(300).call(zoom.scaleBy, 1.3); }
+function zoomOut(){ svg.transition().duration(300).call(zoom.scaleBy, 0.77); }
+function resetZoom(){ svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity.translate(width/2,height/2).scale(0.85).translate(-width/2,-height/2)); }
+
+// Links
+const linkG = g.append('g');
+const linkEls = linkG.selectAll('g').data(edges).join('g');
+
+const linkPaths = linkEls.append('path')
+  .attr('class','link')
+  .attr('stroke', d => CATEGORIES[nodeMap[d.s].cat]?.color || '#475569')
+  .attr('stroke-width', 1.5)
+  .attr('marker-end', d => `url(#arrow-${nodeMap[d.s].cat})`)
+  .on('mouseover', showEdgeTooltip)
+  .on('mouseout', hideTooltip);
+
+const linkLabels = linkEls.append('text')
+  .attr('class','link-label')
+  .text(d => d.rel.replace('\n',' '))
+  .attr('dy', -4);
+
+// Nodes
+const nodeG = g.append('g');
+const nodeEls = nodeG.selectAll('g').data(nodes).join('g')
+  .attr('cursor','grab')
+  .call(d3.drag().on('start',dragStart).on('drag',dragged).on('end',dragEnd));
+
+nodeEls.append('circle')
+  .attr('class','node-circle')
+  .attr('r', d => d.r)
+  .attr('fill', d => {
+    const c = CATEGORIES[d.cat]?.color || '#e2e8f0';
+    return d3.color(c).copy({opacity:0.15});
+  })
+  .attr('stroke', d => CATEGORIES[d.cat]?.color || '#e2e8f0')
+  .attr('stroke-opacity', 0.6)
+  .attr('filter','url(#glow)')
+  .on('mouseover', showNodeTooltip)
+  .on('mouseout', hideTooltip);
+
+// Labels
+nodeEls.each(function(d) {
+  const el = d3.select(this);
+  const lines = d.label.split('\n');
+  const fontSize = d.r > 15 ? 9.5 : 8.5;
+  
+  lines.forEach((line, i) => {
+    const yOff = (i - (lines.length-1)/2) * (fontSize + 2);
+    el.append('text')
+      .attr('class','node-label')
+      .attr('dy', yOff)
+      .attr('font-size', fontSize)
+      .text(line);
+  });
+});
+
+// Simulation
+// Remap edges to use source/target keys for d3
+edges.forEach(e => { e.source = e.s; e.target = e.t; });
+
+const sim = d3.forceSimulation(nodes)
+  .force('link', d3.forceLink(edges)
+    .id(d => d.id)
+    .distance(d => {
+      const sr = nodeMap[d.s]?.r || 10;
+      const tr = nodeMap[d.t]?.r || 10;
+      return sr + tr + 80;
+    })
+    .strength(0.3)
+  )
+  .force('charge', d3.forceManyBody().strength(d => -d.r * 25))
+  .force('center', d3.forceCenter(width/2, height/2))
+  .force('collision', d3.forceCollide().radius(d => d.r + 20))
+  .force('x', d3.forceX(width/2).strength(0.03))
+  .force('y', d3.forceY(height/2).strength(0.03))
+  .alphaDecay(0.015)
+  .on('tick', ticked);
+
+function ticked() {
+  linkPaths.attr('d', d => {
+    const sx = d.source.x, sy = d.source.y;
+    const tx = d.target.x, ty = d.target.y;
+    const dx = tx - sx, dy = ty - sy;
+    const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+    const tr = d.target.r || 10;
+    const ex = tx - (dx/dist) * (tr + 6);
+    const ey = ty - (dy/dist) * (tr + 6);
+    // Slight curve
+    const mx = (sx+ex)/2 - dy*0.08;
+    const my = (sy+ey)/2 + dx*0.08;
+    return `M${sx},${sy}Q${mx},${my},${ex},${ey}`;
+  });
+
+  linkLabels
+    .attr('x', d => (d.source.x + d.target.x)/2 - (d.target.y - d.source.y)*0.04)
+    .attr('y', d => (d.source.y + d.target.y)/2 + (d.target.x - d.source.x)*0.04);
+
+  nodeEls.attr('transform', d => `translate(${d.x},${d.y})`);
+}
+
+// Drag
+function dragStart(e,d){ if(!e.active) sim.alphaTarget(0.1).restart(); d.fx=d.x; d.fy=d.y; d3.select(this).attr('cursor','grabbing'); }
+function dragged(e,d){ d.fx=e.x; d.fy=e.y; }
+function dragEnd(e,d){ if(!e.active) sim.alphaTarget(0); d.fx=null; d.fy=null; d3.select(this).attr('cursor','grab'); }
+
+// Tooltip
+const tooltip = document.getElementById('tooltip');
+
+function showNodeTooltip(e, d) {
+  const cat = CATEGORIES[d.cat];
+  tooltip.innerHTML = `
+    <div class="tt-label" style="color:${cat?.color}">${cat?.label || d.cat}</div>
+    <div class="tt-name">${d.label.replace(/\n/g,' ')}</div>
+  `;
+  tooltip.classList.add('show');
+  positionTooltip(e);
+
+  // Highlight connected
+  const connected = new Set();
+  connected.add(d.id);
+  edges.forEach(edge => {
+    const sid = typeof edge.source === 'object' ? edge.source.id : edge.s;
+    const tid = typeof edge.target === 'object' ? edge.target.id : edge.t;
+    if (sid === d.id) connected.add(tid);
+    if (tid === d.id) connected.add(sid);
+  });
+
+  nodeEls.selectAll('.node-circle').attr('opacity', n => connected.has(n.id) ? 1 : 0.12);
+  nodeEls.selectAll('.node-label').attr('opacity', n => connected.has(n.id) ? 1 : 0.12);
+  linkPaths.attr('stroke-opacity', l => {
+    const sid = typeof l.source === 'object' ? l.source.id : l.s;
+    const tid = typeof l.target === 'object' ? l.target.id : l.t;
+    return (sid === d.id || tid === d.id) ? 0.8 : 0.04;
+  });
+  linkLabels.attr('opacity', l => {
+    const sid = typeof l.source === 'object' ? l.source.id : l.s;
+    const tid = typeof l.target === 'object' ? l.target.id : l.t;
+    return (sid === d.id || tid === d.id) ? 1 : 0;
+  });
+}
+
+function showEdgeTooltip(e, d) {
+  const srcNode = typeof d.source === 'object' ? d.source : nodeMap[d.s];
+  const tgtNode = typeof d.target === 'object' ? d.target : nodeMap[d.t];
+  const srcCat = CATEGORIES[srcNode.cat];
+  tooltip.innerHTML = `
+    <div class="tt-edge-label" style="background:${srcCat?.color}22;color:${srcCat?.color}">${d.rel.replace(/\n/g,' ')}</div>
+    <div class="tt-name">${srcNode.label.replace(/\n/g,' ')} → ${tgtNode.label.replace(/\n/g,' ')}</div>
+    <div class="tt-detail">${d.detail}</div>
+  `;
+  tooltip.classList.add('show');
+  positionTooltip(e);
+}
+
+function hideTooltip() {
+  tooltip.classList.remove('show');
+  nodeEls.selectAll('.node-circle').attr('opacity', 1);
+  nodeEls.selectAll('.node-label').attr('opacity', 1);
+  linkPaths.attr('stroke-opacity', 0.35);
+  linkLabels.attr('opacity', 0.7);
+}
+
+function positionTooltip(e) {
+  let x = e.pageX + 14, y = e.pageY - 10;
+  if (x + 350 > window.innerWidth) x = e.pageX - 354;
+  if (y + 120 > window.innerHeight) y = e.pageY - 120;
+  tooltip.style.left = x + 'px';
+  tooltip.style.top = y + 'px';
+}
+
+// Legend
+const activeCats = new Set(Object.keys(CATEGORIES));
+const legendItems = document.getElementById('legendItems');
+
+Object.entries(CATEGORIES).forEach(([cat,{color,label}]) => {
+  const item = document.createElement('div');
+  item.className = 'legend-item';
+  item.innerHTML = `<div class="legend-dot" style="background:${color}"></div>${label}`;
+  item.onclick = () => toggleCategory(cat, item);
+  legendItems.appendChild(item);
+});
+
+function toggleCategory(cat, el) {
+  if (activeCats.has(cat)) { activeCats.delete(cat); el.classList.add('dimmed'); }
+  else { activeCats.add(cat); el.classList.remove('dimmed'); }
+  applyFilter();
+}
+
+function applyFilter() {
+  nodeEls.attr('display', d => activeCats.has(d.cat) ? null : 'none');
+  linkPaths.attr('display', d => {
+    const src = typeof d.source === 'object' ? d.source : nodeMap[d.s];
+    const tgt = typeof d.target === 'object' ? d.target : nodeMap[d.t];
+    return activeCats.has(src.cat) && activeCats.has(tgt.cat) ? null : 'none';
+  });
+  linkLabels.attr('display', d => {
+    const src = typeof d.source === 'object' ? d.source : nodeMap[d.s];
+    const tgt = typeof d.target === 'object' ? d.target : nodeMap[d.t];
+    return activeCats.has(src.cat) && activeCats.has(tgt.cat) ? null : 'none';
+  });
+}
+
+function toggleLegend() { document.getElementById('legend').classList.toggle('collapsed'); }
+
+// Search
+let searchVisible = false;
+function toggleSearch() {
+  searchVisible = !searchVisible;
+  document.getElementById('searchBox').classList.toggle('show', searchVisible);
+  if (searchVisible) document.getElementById('searchInput').focus();
+  else { document.getElementById('searchInput').value = ''; handleSearch(''); }
+}
+
+function handleSearch(val) {
+  const q = val.toLowerCase().trim();
+  if (!q) {
+    nodeEls.selectAll('.node-circle').attr('opacity',1).attr('stroke-width',2);
+    nodeEls.selectAll('.node-label').attr('opacity',1);
+    linkPaths.attr('stroke-opacity',0.35);
+    return;
+  }
+  const matched = new Set();
+  nodes.forEach(n => { if(n.label.toLowerCase().includes(q) || n.cat.toLowerCase().includes(q)) matched.add(n.id); });
+  nodeEls.selectAll('.node-circle').attr('opacity', d => matched.has(d.id)?1:0.08).attr('stroke-width', d => matched.has(d.id)?3:2);
+  nodeEls.selectAll('.node-label').attr('opacity', d => matched.has(d.id)?1:0.08);
+  linkPaths.attr('stroke-opacity', d => {
+    const sid = typeof d.source==='object'?d.source.id:d.s;
+    const tid = typeof d.target==='object'?d.target.id:d.t;
+    return (matched.has(sid)||matched.has(tid))?0.6:0.03;
+  });
+}
+
+// Initial zoom
+setTimeout(() => resetZoom(), 600);
+setTimeout(() => { document.getElementById('infoPanel').style.opacity = '0'; }, 6000);
+</script>
+</body>
+</html>
